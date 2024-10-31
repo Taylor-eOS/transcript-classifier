@@ -72,23 +72,34 @@ def main():
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
+            #Save the model at each 10th checkpoint
             if (batch_idx + 1) % 10 == 0:
                 print(f"  Batch {batch_idx+1}, Loss: {loss.item()}")
+        checkpoint_dir = f'models/checkpoint_epoch_{epoch+1}_batch_{batch_idx+1}'
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        model.save_pretrained(checkpoint_dir)
+        tokenizer.save_pretrained(checkpoint_dir)
         avg_loss = total_loss / len(train_loader)
-        print(f"  Average training loss: {avg_loss}")
+        #print(f"  Average training loss: {avg_loss}")
+        #Calculate and display validation loss
         model.eval()
+        total_val_loss = 0
         correct = 0
         total = 0
         with torch.no_grad():
             for inputs, labels_batch in val_loader:
                 inputs = {key: val.to(device) for key, val in inputs.items()}
                 labels_batch = labels_batch.to(device)
-                outputs = model(**inputs)
+                outputs = model(**inputs, labels=labels_batch)
+                val_loss = outputs.loss
+                total_val_loss += val_loss.item()
                 logits = outputs.logits
                 predictions = torch.argmax(F.softmax(logits, dim=1), dim=1)
                 correct += (predictions == labels_batch).sum().item()
                 total += labels_batch.size(0)
+        avg_val_loss = total_val_loss / len(val_loader)
         accuracy = correct / total
+        print(f"  Validation Loss: {avg_val_loss}")
         print(f"  Validation Accuracy: {accuracy*100:.2f}%")
     output_dir = 'trained_distilbert'
     os.makedirs(output_dir, exist_ok=True)
@@ -98,4 +109,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
