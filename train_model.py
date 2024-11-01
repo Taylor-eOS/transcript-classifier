@@ -3,27 +3,10 @@ import torch
 from torch.utils.data import Dataset, DataLoader, random_split
 from transformers import DistilBertTokenizerFast, DistilBertForSequenceClassification, AdamW
 import torch.nn.functional as F
+from utils import TranscriptDataset, MAX_LENGTH
 
 EPOCHS = 10
-MAX_LENGTH = 64
-
-class TranscriptDataset(Dataset):
-    def __init__(self, texts, labels, tokenizer, max_length=MAX_LENGTH):
-        self.texts = texts
-        self.labels = labels
-        self.tokenizer = tokenizer
-        self.max_length = max_length
-        print(f"Dataset initialized with {len(self.texts)} samples.")
-
-    def __getitem__(self, idx):
-        encoding = self.tokenizer(
-            self.texts[idx], truncation=True, padding='max_length', max_length=self.max_length, return_tensors='pt')
-        input_length = torch.sum(encoding['input_ids'] != self.tokenizer.pad_token_id).item()
-        #print(f"Token length for sample {idx}: {input_length}")
-        return {key: val.squeeze() for key, val in encoding.items()}, torch.tensor(self.labels[idx], dtype=torch.long)
-
-    def __len__(self):
-        return len(self.texts)
+BATCH_SIZE = 32
 
 def load_transcripts(file_path, label):
     transcripts = []
@@ -52,11 +35,11 @@ def main():
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
     print(f"Training set size: {len(train_dataset)}")
     print(f"Validation set size: {len(val_dataset)}")
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=32)
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE)
     model = DistilBertForSequenceClassification.from_pretrained('distilbert-base-uncased', num_labels=2)
     print("Model loaded.")
-    optimizer = AdamW(model.parameters(), lr=5e-5)
+    optimizer = AdamW(model.parameters(), lr=4e-5)
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     model.to(device)
     for epoch in range(EPOCHS):
@@ -72,16 +55,14 @@ def main():
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
-            #Save the model at each 10th checkpoint
             if (batch_idx + 1) % 10 == 0:
                 print(f"  Batch {batch_idx+1}, Loss: {loss.item()}")
-        checkpoint_dir = f'models/checkpoint_epoch_{epoch+1}_batch_{batch_idx+1}'
+        checkpoint_dir = f'checkpoints/epoch_{epoch+1}'
         os.makedirs(checkpoint_dir, exist_ok=True)
         model.save_pretrained(checkpoint_dir)
         tokenizer.save_pretrained(checkpoint_dir)
         avg_loss = total_loss / len(train_loader)
         #print(f"  Average training loss: {avg_loss}")
-        #Calculate and display validation loss
         model.eval()
         total_val_loss = 0
         correct = 0
@@ -94,18 +75,13 @@ def main():
                 val_loss = outputs.loss
                 total_val_loss += val_loss.item()
                 logits = outputs.logits
-                predictions = torch.argmax(F.softmax(logits, dim=1), dim=1)
+                predictions = torch.argmax(logits, dim=1)
                 correct += (predictions == labels_batch).sum().item()
                 total += labels_batch.size(0)
         avg_val_loss = total_val_loss / len(val_loader)
         accuracy = correct / total
-        print(f"  Validation Loss: {avg_val_loss}")
-        print(f"  Validation Accuracy: {accuracy*100:.2f}%")
-    output_dir = 'trained_distilbert'
-    os.makedirs(output_dir, exist_ok=True)
-    model.save_pretrained(output_dir)
-    tokenizer.save_pretrained(output_dir)
-    print(f"Model and tokenizer saved to {output_dir}.")
+        print(f"  Validation loss: {avg_val_loss}")
+        print(f"  Validation accuracy: {accuracy*100:.2f}%")
 
 if __name__ == "__main__":
     main()
